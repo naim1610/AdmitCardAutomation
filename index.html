@@ -558,7 +558,27 @@ function cardHTML(s, qrElId){
 }
 
 function qrPayload(s){
-  return JSON.stringify({name:s.name, roll:s.roll, dept:s.dept, year:s.year});
+  return JSON.stringify({n:s.name, r:s.roll, d:s.dept, y:s.year});
+}
+
+// qrcodejs (davidshimjs) picks a fixed QR "typeNumber" (grid size) by default,
+// which is too small for longer Bengali text and throws "code length overflow".
+// This tries progressively larger typeNumbers (with the lowest error-correction
+// level, for maximum capacity) until one fits.
+function makeQR(container, text){
+  container.innerHTML = '';
+  const levels = (typeof QRCode !== 'undefined' && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : 1;
+  let lastErr = null;
+  for(let type = 4; type <= 40; type += 2){
+    try{
+      container.innerHTML = '';
+      new QRCode(container, {text: text, width:110, height:110, typeNumber: type, correctLevel: levels});
+      return true;
+    }catch(err){
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('QR তৈরি করা যায়নি');
 }
 
 function populateCardSelector(){
@@ -577,10 +597,13 @@ function renderSelectedCard(){
   wrap.innerHTML = cardHTML(s, 'qr_preview');
   try{
     if(typeof QRCode === 'undefined') throw new Error('QRCode library not loaded');
-    new QRCode(document.getElementById('qr_preview'), {text: qrPayload(s), width:110, height:110});
+    makeQR(document.getElementById('qr_preview'), qrPayload(s));
   }catch(err){
     console.error(err);
-    document.getElementById('qr_preview').innerHTML = '<div style="width:110px;height:110px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#b8362f;text-align:center;padding:4px;">QR লোড ব্যর্থ — ইন্টারনেট সংযোগ পরীক্ষা করুন</div>';
+    const msg = (typeof QRCode === 'undefined')
+      ? 'QR লাইব্রেরি লোড হয়নি — ইন্টারনেট সংযোগ পরীক্ষা করুন'
+      : 'QR তৈরি করা যায়নি: ' + err.message;
+    document.getElementById('qr_preview').innerHTML = '<div style="width:110px;height:110px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#b8362f;text-align:center;padding:4px;">' + msg + '</div>';
   }
   checkLibraries();
 }
@@ -617,7 +640,7 @@ async function downloadPDF(){
     const s = students[idx];
     const hidden = document.getElementById('hiddenRender');
     hidden.innerHTML = cardHTML(s, 'qr_pdf_tmp');
-    new QRCode(document.getElementById('qr_pdf_tmp'), {text: qrPayload(s), width:110, height:110});
+    makeQR(document.getElementById('qr_pdf_tmp'), qrPayload(s));
     await new Promise(r=>setTimeout(r,200));
     const el = hidden.querySelector('.admit-card');
     const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff'});
@@ -646,7 +669,7 @@ async function downloadAllPDF(){
     for(let i=0;i<students.length;i++){
       const s = students[i];
       hidden.innerHTML = cardHTML(s, 'qr_batch_tmp');
-      new QRCode(document.getElementById('qr_batch_tmp'), {text: qrPayload(s), width:110, height:110});
+      makeQR(document.getElementById('qr_batch_tmp'), qrPayload(s));
       await new Promise(r=>setTimeout(r,200));
       const el = hidden.querySelector('.admit-card');
       const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff'});
@@ -681,7 +704,7 @@ function downloadDOC(){
     document.body.appendChild(tmp);
     const qrDiv = document.createElement('div');
     tmp.appendChild(qrDiv);
-    new QRCode(qrDiv, {text: qrPayload(s), width:110, height:110});
+    makeQR(qrDiv, qrPayload(s));
     setTimeout(()=>{
       try{
         const canvas = qrDiv.querySelector('canvas');
@@ -725,8 +748,15 @@ function printCurrentCard(){
       <body>${cardHTML(s, 'qr_print_tmp')}
       <script>
         window.onload = function(){
-          try{ new QRCode(document.getElementById('qr_print_tmp'), {text: ${JSON.stringify(qrPayload(s))}, width:110, height:110}); }
-          catch(e){ console.error(e); }
+          var box = document.getElementById('qr_print_tmp');
+          var ok = false;
+          for(var t = 4; t <= 40 && !ok; t += 2){
+            try{
+              box.innerHTML = '';
+              new QRCode(box, {text: ${JSON.stringify(qrPayload(s))}, width:110, height:110, typeNumber: t, correctLevel: QRCode.CorrectLevel.L});
+              ok = true;
+            }catch(e){ /* try next size */ }
+          }
           setTimeout(function(){ window.focus(); window.print(); }, 300);
         };
       <\/script>
