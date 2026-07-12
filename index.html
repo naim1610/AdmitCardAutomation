@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>এডমিট কার্ড তৈরি সিস্টেম</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.4.4/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -270,7 +270,7 @@
   <div class="card-box no-print" id="step3" style="display:none;">
     <h2>এডমিট কার্ড — প্রিভিউ ও এক্সপোর্ট</h2>
     <div id="libWarning" style="display:none; background:#fff3ee; border:1px solid #f3c8b3; color:#7a3a1a; padding:10px 14px; border-radius:8px; font-size:13px; margin-bottom:14px;"></div>
-    <div class="hint" style="margin-bottom:14px;">টিপ: QR কোড, PDF, DOC ও প্রিন্ট ফিচারগুলো সবচেয়ে নির্ভরযোগ্যভাবে কাজ করে যখন এই HTML ফাইলটি ডাউনলোড করে সরাসরি একটি ব্রাউজার ট্যাবে (Chrome/Edge) খোলা হয় — Claude চ্যাটের ভেতরের প্রিভিউ উইন্ডো থেকে ডাউনলোড/প্রিন্ট সীমিত থাকতে পারে।</div>
+    <div class="hint" style="margin-bottom:14px;">ডাউনলোড করুন অথবা সরাসরি প্রিন্ট করুন</div>
     <div class="toolbar">
       <select id="cardSelector" onchange="renderSelectedCard()" style="max-width:280px;"></select>
       <button class="btn btn-outline btn-sm" onclick="downloadPDF()">⬇ PDF ডাউনলোড</button>
@@ -293,7 +293,7 @@ let editingIndex = -1;
 
 function checkLibraries(){
   const missing = [];
-  if(typeof QRCode === 'undefined') missing.push('QR কোড (qrcodejs)');
+  if(typeof QRCode === 'undefined') missing.push('QR কোড লাইব্রেরি');
   if(typeof html2canvas === 'undefined') missing.push('html2canvas');
   if(!window.jspdf) missing.push('jsPDF');
   if(typeof JSZip === 'undefined') missing.push('JSZip');
@@ -561,24 +561,23 @@ function qrPayload(s){
   return JSON.stringify({n:s.name, r:s.roll, d:s.dept, y:s.year});
 }
 
-// qrcodejs (davidshimjs) picks a fixed QR "typeNumber" (grid size) by default,
-// which is too small for longer Bengali text and throws "code length overflow".
-// This tries progressively larger typeNumbers (with the lowest error-correction
-// level, for maximum capacity) until one fits.
+// Uses the "qrcode" library (soldair/node-qrcode) via QRCode.toCanvas, which
+// properly auto-selects the QR version (up to 40) to fit the data — no
+// artificial size cap like the old qrcodejs library had.
 function makeQR(container, text){
-  container.innerHTML = '';
-  const levels = (typeof QRCode !== 'undefined' && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : 1;
-  let lastErr = null;
-  for(let type = 4; type <= 40; type += 2){
-    try{
-      container.innerHTML = '';
-      new QRCode(container, {text: text, width:110, height:110, typeNumber: type, correctLevel: levels});
-      return true;
-    }catch(err){
-      lastErr = err;
+  return new Promise((resolve, reject)=>{
+    container.innerHTML = '';
+    if(typeof QRCode === 'undefined' || !QRCode.toCanvas){
+      reject(new Error('QR লাইব্রেরি লোড হয়নি'));
+      return;
     }
-  }
-  throw lastErr || new Error('QR তৈরি করা যায়নি');
+    const canvas = document.createElement('canvas');
+    container.appendChild(canvas);
+    QRCode.toCanvas(canvas, text, {width:110, margin:1, errorCorrectionLevel:'M'}, function(err){
+      if(err){ reject(err); return; }
+      resolve(canvas);
+    });
+  });
 }
 
 function populateCardSelector(){
@@ -586,7 +585,7 @@ function populateCardSelector(){
   sel.innerHTML = students.map((s,i)=>`<option value="${i}">${s.name} — রোল ${s.roll}</option>`).join('');
 }
 
-function renderSelectedCard(){
+async function renderSelectedCard(){
   const wrap = document.getElementById('cardPreviewWrap');
   if(students.length===0){
     wrap.innerHTML = '<div class="empty-msg">কোনো শিক্ষার্থী যুক্ত নেই। আগের ধাপে ফিরে শিক্ষার্থী যুক্ত করুন।</div>';
@@ -596,14 +595,10 @@ function renderSelectedCard(){
   const s = students[idx];
   wrap.innerHTML = cardHTML(s, 'qr_preview');
   try{
-    if(typeof QRCode === 'undefined') throw new Error('QRCode library not loaded');
-    makeQR(document.getElementById('qr_preview'), qrPayload(s));
+    await makeQR(document.getElementById('qr_preview'), qrPayload(s));
   }catch(err){
     console.error(err);
-    const msg = (typeof QRCode === 'undefined')
-      ? 'QR লাইব্রেরি লোড হয়নি — ইন্টারনেট সংযোগ পরীক্ষা করুন'
-      : 'QR তৈরি করা যায়নি: ' + err.message;
-    document.getElementById('qr_preview').innerHTML = '<div style="width:110px;height:110px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#b8362f;text-align:center;padding:4px;">' + msg + '</div>';
+    document.getElementById('qr_preview').innerHTML = '<div style="width:110px;height:110px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#b8362f;text-align:center;padding:4px;">QR তৈরি করা যায়নি: ' + err.message + '</div>';
   }
   checkLibraries();
 }
@@ -640,8 +635,7 @@ async function downloadPDF(){
     const s = students[idx];
     const hidden = document.getElementById('hiddenRender');
     hidden.innerHTML = cardHTML(s, 'qr_pdf_tmp');
-    makeQR(document.getElementById('qr_pdf_tmp'), qrPayload(s));
-    await new Promise(r=>setTimeout(r,200));
+    await makeQR(document.getElementById('qr_pdf_tmp'), qrPayload(s));
     const el = hidden.querySelector('.admit-card');
     const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff'});
     const imgData = canvas.toDataURL('image/png');
@@ -669,8 +663,7 @@ async function downloadAllPDF(){
     for(let i=0;i<students.length;i++){
       const s = students[i];
       hidden.innerHTML = cardHTML(s, 'qr_batch_tmp');
-      makeQR(document.getElementById('qr_batch_tmp'), qrPayload(s));
-      await new Promise(r=>setTimeout(r,200));
+      await makeQR(document.getElementById('qr_batch_tmp'), qrPayload(s));
       const el = hidden.querySelector('.admit-card');
       const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff'});
       const imgData = canvas.toDataURL('image/png');
@@ -692,41 +685,31 @@ async function downloadAllPDF(){
 }
 
 // ---------- EXPORT: DOC ----------
-function downloadDOC(){
+async function downloadDOC(){
   if(students.length===0) return;
-  if(typeof QRCode === 'undefined'){ alert('QR লাইব্রেরি লোড হয়নি। ফাইলটি ডাউনলোড করে সরাসরি ব্রাউজারে খুলে আবার চেষ্টা করুন।'); return; }
+  const idx = getCurrentIndex();
+  const s = students[idx];
+  const tmp = document.createElement('div');
+  tmp.style.position='fixed'; tmp.style.left='-9999px';
+  document.body.appendChild(tmp);
+  const qrDiv = document.createElement('div');
+  tmp.appendChild(qrDiv);
   try{
-    const idx = getCurrentIndex();
-    const s = students[idx];
-    // Render QR as data URL image for embedding into the doc (QR lib draws to canvas)
-    const tmp = document.createElement('div');
-    tmp.style.position='fixed'; tmp.style.left='-9999px';
-    document.body.appendChild(tmp);
-    const qrDiv = document.createElement('div');
-    tmp.appendChild(qrDiv);
-    makeQR(qrDiv, qrPayload(s));
-    setTimeout(()=>{
-      try{
-        const canvas = qrDiv.querySelector('canvas');
-        const qrDataUrl = canvas ? canvas.toDataURL('image/png') : '';
-        let html = cardHTML(s, 'qr_doc_placeholder');
-        html = html.replace(/<div class="qrbox" id="qr_doc_placeholder"><\/div>/, `<div class="qrbox"><img src="${qrDataUrl}" width="110" height="110"></div>`);
-        const preHtml = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><style>"
-          + document.querySelector('style').innerHTML + "</style></head><body>";
-        const postHtml = "</body></html>";
-        const fullHtml = preHtml + html + postHtml;
-        const blob = new Blob(['\ufeff', fullHtml], {type:'application/msword'});
-        triggerBlobDownload(blob, `Admit_Card_${s.roll}_${s.name}.doc`);
-      }catch(err){
-        console.error(err);
-        alert('DOC তৈরি করা যায়নি: ' + err.message);
-      }finally{
-        document.body.removeChild(tmp);
-      }
-    }, 200);
+    const canvas = await makeQR(qrDiv, qrPayload(s));
+    const qrDataUrl = canvas.toDataURL('image/png');
+    let html = cardHTML(s, 'qr_doc_placeholder');
+    html = html.replace(/<div class="qrbox" id="qr_doc_placeholder"><\/div>/, `<div class="qrbox"><img src="${qrDataUrl}" width="110" height="110"></div>`);
+    const preHtml = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><style>"
+      + document.querySelector('style').innerHTML + "</style></head><body>";
+    const postHtml = "</body></html>";
+    const fullHtml = preHtml + html + postHtml;
+    const blob = new Blob(['\ufeff', fullHtml], {type:'application/msword'});
+    triggerBlobDownload(blob, `Admit_Card_${s.roll}_${s.name}.doc`);
   }catch(err){
     console.error(err);
-    alert('DOC তৈরি করা যায়নি: ' + err.message);
+    alert('DOC তৈরি করা যায়নি: ' + err.message + '\nফাইলটি ডাউনলোড করে সরাসরি ব্রাউজারে খুলে আবার চেষ্টা করুন।');
+  }finally{
+    document.body.removeChild(tmp);
   }
 }
 
@@ -743,21 +726,24 @@ function printCurrentCard(){
       return;
     }
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Admit Card - ${s.name}</title>
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.4.4/qrcode.min.js"><\/script>
       <style>${styles} body{padding:20px;}</style></head>
       <body>${cardHTML(s, 'qr_print_tmp')}
       <script>
         window.onload = function(){
           var box = document.getElementById('qr_print_tmp');
-          var ok = false;
-          for(var t = 4; t <= 40 && !ok; t += 2){
-            try{
-              box.innerHTML = '';
-              new QRCode(box, {text: ${JSON.stringify(qrPayload(s))}, width:110, height:110, typeNumber: t, correctLevel: QRCode.CorrectLevel.L});
-              ok = true;
-            }catch(e){ /* try next size */ }
+          var canvas = document.createElement('canvas');
+          box.appendChild(canvas);
+          function goPrint(){ setTimeout(function(){ window.focus(); window.print(); }, 300); }
+          if(typeof QRCode !== 'undefined' && QRCode.toCanvas){
+            QRCode.toCanvas(canvas, ${JSON.stringify(qrPayload(s))}, {width:110, margin:1, errorCorrectionLevel:'M'}, function(err){
+              if(err){ box.innerHTML = 'QR তৈরি ব্যর্থ'; console.error(err); }
+              goPrint();
+            });
+          } else {
+            box.innerHTML = 'QR লোড ব্যর্থ';
+            goPrint();
           }
-          setTimeout(function(){ window.focus(); window.print(); }, 300);
         };
       <\/script>
       </body></html>`);
