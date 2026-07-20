@@ -270,7 +270,7 @@
   <div class="card-box no-print" id="step3" style="display:none;">
     <h2>এডমিট কার্ড — প্রিভিউ ও এক্সপোর্ট</h2>
     <div id="libWarning" style="display:none; background:#fff3ee; border:1px solid #f3c8b3; color:#7a3a1a; padding:10px 14px; border-radius:8px; font-size:13px; margin-bottom:14px;"></div>
-    <div class="hint" style="margin-bottom:14px;">ডাউনলোড করুন অথবা সরাসরি প্রিন্ট করুন</div>
+    <div class="hint" style="margin-bottom:14px;">টিপ: QR কোড, PDF, DOC ও প্রিন্ট ফিচারগুলো সবচেয়ে নির্ভরযোগ্যভাবে কাজ করে যখন এই HTML ফাইলটি ডাউনলোড করে সরাসরি একটি ব্রাউজার ট্যাবে (Chrome/Edge) খোলা হয় — Claude চ্যাটের ভেতরের প্রিভিউ উইন্ডো থেকে ডাউনলোড/প্রিন্ট সীমিত থাকতে পারে।</div>
     <div class="toolbar">
       <select id="cardSelector" onchange="renderSelectedCard()" style="max-width:280px;"></select>
       <button class="btn btn-outline btn-sm" onclick="downloadPDF()">⬇ PDF ডাউনলোড</button>
@@ -558,7 +558,9 @@ function cardHTML(s, qrElId){
 }
 
 function qrPayload(s){
-  return JSON.stringify({n:s.name, r:s.roll, d:s.dept, y:s.year});
+  // শুধু রোল নম্বর এনকোড করা হয় — এতে QR কোড অনেক ছোট ও কম ঘনত্বের হয়,
+  // ফলে ফোনের ক্যামেরায় দ্রুত ও নির্ভরযোগ্যভাবে স্ক্যান হয়।
+  return String(s.roll);
 }
 
 // Uses the "qrcode" library (soldair/node-qrcode) via QRCode.toCanvas, which
@@ -685,6 +687,86 @@ async function downloadAllPDF(){
 }
 
 // ---------- EXPORT: DOC ----------
+// Word-এর HTML রেন্ডারিং ইঞ্জিন flexbox বা CSS variable (var(--x)) সাপোর্ট করে না —
+// এগুলো ব্যবহার করলে .ac-header/.ac-body/.ac-footer-এর পাশাপাশি সাজানো অংশগুলো একটার
+// নিচে একটা হয়ে ভেঙে যায় এবং রঙও হারিয়ে যায়। তাই DOC এক্সপোর্টের জন্য সম্পূর্ণ আলাদা,
+// টেবিল-ভিত্তিক ও ইনলাইন-স্টাইলযুক্ত একটি টেমপ্লেট — যা Word নির্ভরযোগ্যভাবে রেন্ডার করে।
+function cardHTMLWord(s, qrImgTag){
+  const NAVY='#122a4d', GOLD='#c99a3c', GRAY='#555555';
+  const payColor = s.payment==='পেইড' ? '#1e7a3d' : (s.payment==='ডিউ' ? '#c9760f' : '#b8362f');
+  const logoCell = config.logo
+    ? `<img src="${config.logo}" width="64" height="64" style="display:block;">`
+    : '&nbsp;';
+  const addr = config.collegeAddress ? `<div style="font-size:13px;color:${GRAY};">${config.collegeAddress}</div>` : '';
+  const subjectsLine = s.subjects.map((x,i)=>`${i+1}. ${x}`).join('&nbsp;&nbsp;&nbsp;');
+
+  const infoRow = (k,v) => `<tr><td style="width:150px;color:${GRAY};font-weight:bold;padding:4px;font-size:13px;">${k}</td><td style="font-weight:bold;padding:4px;font-size:13px;">: ${v}</td></tr>`;
+  let infoRows = infoRow('শিক্ষার্থীর নাম', s.name)
+    + infoRow('রোল নম্বর', s.roll)
+    + infoRow('বিভাগ', s.dept)
+    + infoRow('বর্ষ', s.year)
+    + infoRow('চতুর্থ বিষয়', s.fourth);
+  if(s.guardianName) infoRows += infoRow('অভিভাবক', s.guardianName + (s.guardianRelation?' ('+s.guardianRelation+')':''));
+  if(s.guardianMobile) infoRows += infoRow('অভিভাবকের মোবাইল', s.guardianMobile);
+
+  return `
+  <table width="780" cellpadding="6" cellspacing="0" style="border:3px solid ${NAVY};">
+    <tr><td>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${GOLD};">
+        <tr><td style="padding:18px 24px 20px;">
+
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-bottom:2px solid ${GOLD}; padding-bottom:12px; margin-bottom:14px;">
+            <tr>
+              <td width="64" valign="middle">${logoCell}</td>
+              <td align="center" valign="middle">
+                <div style="font-size:21px;font-weight:bold;color:${NAVY};">${config.collegeName}</div>
+                ${addr}
+                <div style="font-size:13px;color:${GRAY};margin-top:2px;">${config.examName}</div>
+                <table cellpadding="0" cellspacing="0" style="margin:8px auto 0;"><tr>
+                  <td bgcolor="${NAVY}" style="padding:4px 22px;color:#ffffff;font-size:13px;font-weight:bold;">প্রবেশপত্র</td>
+                </tr></table>
+              </td>
+              <td width="64">&nbsp;</td>
+            </tr>
+          </table>
+
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td valign="top">
+                <table cellpadding="0" cellspacing="0">${infoRows}</table>
+                <div style="margin-top:8px;font-size:13px;">
+                  <span style="color:${GRAY};font-weight:bold;">পঠিত বিষয়সমূহ:</span><br>
+                  <span>${subjectsLine}</span>
+                </div>
+              </td>
+              <td width="170" valign="top" align="center">
+                <table cellpadding="6" cellspacing="0" style="border:1px solid #dddddd;"><tr><td>${qrImgTag}</td></tr></table>
+                <div style="font-size:10px;color:#888888;margin-top:4px;">উপস্থিতি যাচাইকরণ QR কোড</div>
+                <table cellpadding="0" cellspacing="0" style="margin-top:8px;"><tr>
+                  <td bgcolor="${payColor}" style="padding:3px 10px;color:#ffffff;font-size:11.5px;font-weight:bold;">${s.payment}</td>
+                </tr></table>
+              </td>
+            </tr>
+          </table>
+
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:34px;">
+            <tr>
+              <td width="33%" align="center" style="border-top:1px solid #444444;padding-top:6px;font-size:12px;color:#444444;">শিক্ষার্থীর স্বাক্ষর</td>
+              <td width="33%" align="center" style="border-top:1px solid #444444;padding-top:6px;font-size:12px;color:#444444;">কেন্দ্র সচিবের স্বাক্ষর</td>
+              <td width="33%" align="center" style="border-top:1px solid #444444;padding-top:6px;font-size:12px;color:#444444;">অধ্যক্ষের স্বাক্ষর</td>
+            </tr>
+          </table>
+
+          <div style="margin-top:16px;font-size:11px;color:#777777;border-top:1px dashed #cccccc;padding-top:8px;">
+            এই প্রবেশপত্র ব্যতীত কোনো পরীক্ষার্থীকে পরীক্ষা কেন্দ্রে প্রবেশ করতে দেওয়া হবে না। প্রবেশপত্রটি পরীক্ষা চলাকালীন সাথে রাখা আবশ্যক।
+          </div>
+
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
+}
+
 async function downloadDOC(){
   if(students.length===0) return;
   const idx = getCurrentIndex();
@@ -697,10 +779,10 @@ async function downloadDOC(){
   try{
     const canvas = await makeQR(qrDiv, qrPayload(s));
     const qrDataUrl = canvas.toDataURL('image/png');
-    let html = cardHTML(s, 'qr_doc_placeholder');
-    html = html.replace(/<div class="qrbox" id="qr_doc_placeholder"><\/div>/, `<div class="qrbox"><img src="${qrDataUrl}" width="110" height="110"></div>`);
-    const preHtml = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><style>"
-      + document.querySelector('style').innerHTML + "</style></head><body>";
+    const qrImgTag = `<img src="${qrDataUrl}" width="110" height="110" style="display:block;">`;
+    const html = cardHTMLWord(s, qrImgTag);
+    const preHtml = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'>"
+      + "<style>@page{size:29.7cm 21cm; margin:1cm;} body{font-family:'Noto Sans Bengali','Hind Siliguri',Arial,sans-serif;}</style></head><body>";
     const postHtml = "</body></html>";
     const fullHtml = preHtml + html + postHtml;
     const blob = new Blob(['\ufeff', fullHtml], {type:'application/msword'});
