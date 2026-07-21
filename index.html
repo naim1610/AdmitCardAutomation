@@ -277,6 +277,7 @@
       <button class="btn btn-outline btn-sm" onclick="downloadDOC()">⬇ DOC ডাউনলোড</button>
       <button class="btn btn-outline btn-sm" onclick="printCurrentCard()">🖨 প্রিন্ট করুন</button>
       <button class="btn btn-gold btn-sm" onclick="downloadAllPDF()">📦 সকল কার্ড একসাথে PDF</button>
+      <button class="btn btn-gold btn-sm" onclick="downloadAllDOC()">📦 সকল কার্ড একসাথে DOC</button>
     </div>
     <div id="cardPreviewWrap" style="overflow-x:auto; padding:10px 0;"></div>
   </div>
@@ -662,18 +663,26 @@ async function downloadAllPDF(){
     const { jsPDF } = window.jspdf;
     let pdf = null;
     const hidden = document.getElementById('hiddenRender');
-    for(let i=0;i<students.length;i++){
-      const s = students[i];
-      hidden.innerHTML = cardHTML(s, 'qr_batch_tmp');
-      await makeQR(document.getElementById('qr_batch_tmp'), qrPayload(s));
-      const el = hidden.querySelector('.admit-card');
+    // পৃষ্ঠা অপচয় কমাতে প্রতি পৃষ্ঠায় দুটি করে কার্ড উপরে-নিচে (stacked) রাখা হচ্ছে,
+    // যাতে প্রতিটি কার্ড পূর্ণ আকারে থাকে এবং পাশাপাশি রাখলে যে ফাঁকা জায়গা নষ্ট হতো তা এড়ানো যায়
+    for(let i=0; i<students.length; i+=2){
+      const s1 = students[i];
+      const s2 = students[i+1];
+      hidden.innerHTML = `<div style="display:flex; flex-direction:column; gap:24px;">
+        <div>${cardHTML(s1, 'qr_batch_tmp_a')}</div>
+        ${s2 ? `<div>${cardHTML(s2, 'qr_batch_tmp_b')}</div>` : ''}
+      </div>`;
+      await makeQR(document.getElementById('qr_batch_tmp_a'), qrPayload(s1));
+      if(s2) await makeQR(document.getElementById('qr_batch_tmp_b'), qrPayload(s2));
+      const el = hidden.firstElementChild;
       const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff'});
       const imgData = canvas.toDataURL('image/png');
       const w = canvas.width/2, h = canvas.height/2;
+      const orient = w >= h ? 'landscape' : 'portrait';
       if(!pdf){
-        pdf = new jsPDF({orientation:'landscape', unit:'pt', format:[w,h]});
+        pdf = new jsPDF({orientation:orient, unit:'pt', format:[w,h]});
       } else {
-        pdf.addPage([w,h], 'landscape');
+        pdf.addPage([w,h], orient);
       }
       pdf.addImage(imgData, 'PNG', 0, 0, w, h);
     }
@@ -710,7 +719,7 @@ function cardHTMLWord(s, qrImgTag){
   if(s.guardianMobile) infoRows += infoRow('অভিভাবকের মোবাইল', s.guardianMobile);
 
   return `
-  <table width="780" cellpadding="6" cellspacing="0" style="border:3px solid ${NAVY};">
+  <table width="100%" cellpadding="6" cellspacing="0" style="border:3px solid ${NAVY};">
     <tr><td>
       <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${GOLD};">
         <tr><td style="padding:18px 24px 20px;">
@@ -780,7 +789,7 @@ async function downloadDOC(){
     const canvas = await makeQR(qrDiv, qrPayload(s));
     const qrDataUrl = canvas.toDataURL('image/png');
     const qrImgTag = `<img src="${qrDataUrl}" width="110" height="110" style="display:block;">`;
-    const html = cardHTMLWord(s, qrImgTag);
+    const html = `<div style="width:780px; margin:0 auto;">${cardHTMLWord(s, qrImgTag)}</div>`;
     const preHtml = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'>"
       + "<style>@page{size:29.7cm 21cm; margin:1cm;} body{font-family:'Noto Sans Bengali','Hind Siliguri',Arial,sans-serif;}</style></head><body>";
     const postHtml = "</body></html>";
@@ -794,6 +803,57 @@ async function downloadDOC(){
     document.body.removeChild(tmp);
   }
 }
+
+// ---------- EXPORT: ALL AS ONE DOC (দুটি করে কার্ড প্রতি পৃষ্ঠায়, উপরে-নিচে) ----------
+async function downloadAllDOC(){
+  if(students.length===0) return;
+  const tmp = document.createElement('div');
+  tmp.style.position='fixed'; tmp.style.left='-9999px';
+  document.body.appendChild(tmp);
+  try{
+    const pageBreak = "<br clear=all style='mso-special-character:line-break;page-break-before:always'>";
+    let bodyHtml = '';
+    for(let i=0; i<students.length; i+=2){
+      const s1 = students[i];
+      const s2 = students[i+1];
+
+      const qrDiv1 = document.createElement('div');
+      tmp.appendChild(qrDiv1);
+      const canvas1 = await makeQR(qrDiv1, qrPayload(s1));
+      const qrTag1 = `<img src="${canvas1.toDataURL('image/png')}" width="110" height="110" style="display:block;">`;
+      const card1Html = cardHTMLWord(s1, qrTag1);
+
+      let card2Html = '';
+      if(s2){
+        const qrDiv2 = document.createElement('div');
+        tmp.appendChild(qrDiv2);
+        const canvas2 = await makeQR(qrDiv2, qrPayload(s2));
+        const qrTag2 = `<img src="${canvas2.toDataURL('image/png')}" width="110" height="110" style="display:block;">`;
+        card2Html = cardHTMLWord(s2, qrTag2);
+      }
+
+      // পূর্ণ আকারের কার্ড উপরে-নিচে বসানো হচ্ছে, যাতে পাশাপাশি রাখলে যে ফাঁকা জায়গা নষ্ট হতো তা এড়ানো যায়
+      bodyHtml += `<div style="width:700px; margin:0 auto;">
+        <div>${card1Html}</div>
+        ${card2Html ? `<div style="height:20px;"></div><div>${card2Html}</div>` : ''}
+      </div>`;
+      if(i+2 < students.length) bodyHtml += pageBreak;
+    }
+
+    const preHtml = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'>"
+      + "<style>@page{size:21cm 29.7cm; margin:1cm;} body{font-family:'Noto Sans Bengali','Hind Siliguri',Arial,sans-serif;}</style></head><body>";
+    const postHtml = "</body></html>";
+    const fullHtml = preHtml + bodyHtml + postHtml;
+    const blob = new Blob(['\ufeff', fullHtml], {type:'application/msword'});
+    triggerBlobDownload(blob, `সকল_এডমিট_কার্ড_${config.examName || 'exam'}.doc`);
+  }catch(err){
+    console.error(err);
+    alert('DOC তৈরি করা যায়নি: ' + err.message + '\nফাইলটি ডাউনলোড করে সরাসরি ব্রাউজারে খুলে আবার চেষ্টা করুন।');
+  }finally{
+    document.body.removeChild(tmp);
+  }
+}
+
 
 // ---------- PRINT ----------
 function printCurrentCard(){
